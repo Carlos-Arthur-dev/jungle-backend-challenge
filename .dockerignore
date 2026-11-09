@@ -1,0 +1,8 @@
+node_modules
+.tools
+.git
+.env
+coverage
+dist
+*.log
+.delivery

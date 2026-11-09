@@ -1,0 +1,43 @@
+import { Money } from './money';
+
+export type LedgerDirection = 'DEBIT' | 'CREDIT';
+export interface LedgerEntryState {
+  readonly id: string;
+  readonly walletId: string;
+  readonly transactionId: string;
+  readonly direction: LedgerDirection;
+  readonly money: Money;
+  readonly balanceBefore: Money;
+  readonly balanceAfter: Money;
+  readonly createdAt: Date;
+}
+
+export class WalletLedgerEntry {
+  private readonly state: LedgerEntryState;
+  private constructor(state: LedgerEntryState) {
+    this.state = Object.freeze({ ...state, createdAt: new Date(state.createdAt) });
+    Object.freeze(this);
+  }
+  static create(state: LedgerEntryState): WalletLedgerEntry {
+    if (!['DEBIT', 'CREDIT'].includes(state.direction)) throw new Error('INVALID_LEDGER_DIRECTION');
+    if (!state.money.isPositive()) throw new Error('INVALID_LEDGER_AMOUNT');
+    if (state.balanceBefore.isNegative() || state.balanceAfter.isNegative()) throw new Error('NEGATIVE_BALANCE');
+    const entry = new WalletLedgerEntry(state);
+    if (!entry.isBalanced()) throw new Error('UNBALANCED_LEDGER_ENTRY');
+    return entry;
+  }
+  static rehydrate(state: LedgerEntryState): WalletLedgerEntry { return new WalletLedgerEntry(state); }
+  get id(): string { return this.state.id; }
+  get walletId(): string { return this.state.walletId; }
+  get transactionId(): string { return this.state.transactionId; }
+  get direction(): LedgerDirection { return this.state.direction; }
+  get money(): Money { return this.state.money; }
+  get balanceBefore(): Money { return this.state.balanceBefore; }
+  get balanceAfter(): Money { return this.state.balanceAfter; }
+  get createdAt(): Date { return new Date(this.state.createdAt); }
+  isBalanced(): boolean {
+    const expected = this.direction === 'CREDIT'
+      ? this.balanceBefore.add(this.money) : this.balanceBefore.subtract(this.money);
+    return expected.equals(this.balanceAfter);
+  }
+}

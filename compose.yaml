@@ -1,0 +1,92 @@
+name: jungle-wagering
+services:
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: validation
+    command: ["sh", "-c", "bun run typecheck && bun test tests/unit tests/integration"]
+    environment:
+      DATABASE_URL: postgresql://jungle:jungle_local@postgres:5432/jungle
+      SQS_ENDPOINT: http://localstack:4566
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
+  migrate:
+    build: .
+    command: ["bun", "src/infrastructure/migrate.ts"]
+    environment:
+      DATABASE_URL: postgresql://jungle:jungle_local@postgres:5432/jungle
+    depends_on:
+      postgres:
+        condition: service_healthy
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://jungle:jungle_local@postgres:5432/jungle
+      SQS_ENDPOINT: http://localstack:4566
+    ports:
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:3000/health/ready');process.exit(r.ok?0:1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 30s
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["bun", "src/worker.ts"]
+    environment:
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://jungle:jungle_local@postgres:5432/jungle
+      SQS_ENDPOINT: http://localstack:4566
+    ports:
+      - "127.0.0.1:${WORKER_METRICS_PORT:-3001}:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
+    stop_grace_period: 90s
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jungle
+      POSTGRES_USER: jungle
+      POSTGRES_PASSWORD: jungle_local
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jungle -d jungle"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  localstack:
+    image: localstack/localstack:4.0.3
+    restart: unless-stopped
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: dynamic
+    ports:
+      - "127.0.0.1:${LOCALSTACK_PORT:-4566}:4566"
+    healthcheck:
+      test: ["CMD", "awslocal", "sqs", "list-queues"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+volumes:
+  postgres_data:
